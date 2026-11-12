@@ -23,3 +23,4 @@ func (n Nota) CrearMemento() NotaMemento {
 func (n *Nota) Restaurar(m NotaMemento) {
 	n.Calificacion = m.Calificacion
 }
+

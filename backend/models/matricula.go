@@ -45,3 +45,4 @@ func (m *Matricula) CambiarEstado(nuevo string) error {
 	m.Estado = nuevo
 	return nil
 }
+

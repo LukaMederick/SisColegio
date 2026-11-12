@@ -9,6 +9,7 @@ export default function MatriculasCRUD() {
 
   const crear = async (e) => {
     e.preventDefault();
+    if (!form.estudiante || !form.curso) return alert('Ingresa estudiante y curso');
     await fetch('/api/matriculas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
     setForm({ estudiante: '', curso: '' });
     load();
@@ -26,9 +27,9 @@ export default function MatriculasCRUD() {
     <div>
       <h2>Matrículas (Patrón State)</h2>
       <form onSubmit={crear} style={{ display: 'flex', gap: 8, marginBottom: 15 }}>
-        <input placeholder="Estudiante" value={form.estudiante} onChange={e => setForm({ ...form, estudiante: e.target.value })} required />
-        <input placeholder="Curso" value={form.curso} onChange={e => setForm({ ...form, curso: e.target.value })} required />
-        <button type="submit">+ Matricular</button>
+        <input placeholder="Nombre del Estudiante" value={form.estudiante} onChange={e => setForm({ ...form, estudiante: e.target.value })} required />
+        <input placeholder="Nombre del Curso" value={form.curso} onChange={e => setForm({ ...form, curso: e.target.value })} required />
+        <button type="submit" style={{ whiteSpace: 'nowrap' }}>+ Matricular</button>
       </form>
       <table width="100%">
         <thead><tr><th>Estudiante</th><th>Curso</th><th>Estado</th><th>Transiciones (State)</th><th>Acción</th></tr></thead>
