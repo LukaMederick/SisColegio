@@ -17,6 +17,7 @@ func (h MatriculasHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
+		// Listar matrículas registradas
 		rows, _ := h.DB.Query("SELECT id, estudiante, curso, estado FROM matriculas")
 		defer rows.Close()
 		res := []models.Matricula{}
@@ -27,6 +28,7 @@ func (h MatriculasHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(res)
 	case "POST":
+		// Toda matrícula nueva inicia en estado 'Pendiente'
 		var m models.Matricula
 		json.NewDecoder(r.Body).Decode(&m)
 		if m.Estado == "" { m.Estado = "Pendiente" }
@@ -34,10 +36,13 @@ func (h MatriculasHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		m.ID, _ = res.LastInsertId()
 		json.NewEncoder(w).Encode(m)
 	case "PUT":
+		// PATRÓN STATE: Se carga el objeto y se delega la validación de transición a CambiarEstado()
 		var body struct{ Estado string `json:"estado"` }
 		json.NewDecoder(r.Body).Decode(&body)
 		var m models.Matricula
 		h.DB.QueryRow("SELECT id, estudiante, curso, estado FROM matriculas WHERE id = ?", id).Scan(&m.ID, &m.Estudiante, &m.Curso, &m.Estado)
+		
+		// Si la transición es inválida (ej: Pendiente -> Finalizada), responde HTTP 400
 		if err := m.CambiarEstado(body.Estado); err != nil {
 			http.Error(w, err.Error(), 400); return
 		}

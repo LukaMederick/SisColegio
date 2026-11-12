@@ -5,7 +5,7 @@ export default function NotasCRUD() {
   const load = () => { fetch('/api/notas').then(r => r.json()).then(setList); fetch('/api/matriculas').then(r => r.json()).then(setMats); };
   useEffect(() => { load(); }, []);
 
-  // Regla de negocio: solo estudiantes cuya matrícula esté 'Activa'
+  // REGLA DE NEGOCIO: Filtra solo estudiantes con matrícula 'Activa' para el dropdown
   const activas = mats.filter(m => m.estado === 'Activa');
   const alumnos = [...new Set(activas.map(m => m.estudiante))];
   const cursos = form.estudiante ? [...new Set(activas.filter(m => m.estudiante === form.estudiante).map(m => m.curso))] : [...new Set(activas.map(m => m.curso))];
@@ -17,10 +17,14 @@ export default function NotasCRUD() {
     if (!res.ok) { const txt = await res.text(); return alert(txt); }
     setForm({ estudiante: '', curso: '', calificacion: '' }); load();
   };
+
+  // Al editar se llama al PUT del backend, que guarda un Memento previo antes de cambiar la nota
   const editar = async (n) => {
     const val = prompt('Nueva calificación:', n.calificacion);
     if (val != null) fetch(`/api/notas/${n.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...n, calificacion: parseFloat(val) }) }).then(load);
   };
+
+  // PATRÓN MEMENTO: Dispara el endpoint /undo para restaurar la calificación previa
   const undo = (id) => fetch(`/api/notas/${id}/undo`, { method: 'POST' }).then(load);
   const eliminar = (id) => fetch(`/api/notas/${id}`, { method: 'DELETE' }).then(load);
 
@@ -28,6 +32,7 @@ export default function NotasCRUD() {
     <div>
       <h2>Notas</h2>
       <form onSubmit={guardar} style={{ display: 'flex', gap: 8, marginBottom: 15 }}>
+        {/* Select dinámico alimentado solo de alumnos activos */}
         <select value={form.estudiante} onChange={e => setForm({ ...form, estudiante: e.target.value, curso: '' })} required>
           <option value="">-- Estudiante Activo --</option>
           {alumnos.map(a => <option key={a} value={a}>{a}</option>)}
@@ -48,6 +53,7 @@ export default function NotasCRUD() {
               <td>{n.estudiante}</td><td>{n.curso}</td><td><b>{n.calificacion}</b></td>
               <td>
                 <button onClick={() => editar(n)} style={{ marginRight: 4 }}>Editar</button>
+                {/* Botón que aprovecha el patrón Memento para deshacer */}
                 <button onClick={() => undo(n.id)} style={{ marginRight: 4 }}>↩ Deshacer</button>
                 <button onClick={() => eliminar(n.id)}>Eliminar</button>
               </td>

@@ -6,11 +6,14 @@ export default function MatriculasCRUD() {
   const load = () => fetch('/api/matriculas').then(r => r.json()).then(setList);
   useEffect(() => { load(); }, []);
 
+  // Crea matrícula (el backend le asigna automáticamente estado 'Pendiente')
   const crear = async (e) => {
     e.preventDefault();
     await fetch('/api/matriculas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
     setForm({ estudiante: '', curso: '' }); load();
   };
+
+  // PATRÓN STATE: Ejecuta la transición de estado si la regla lo permite
   const cambiar = (id, act, n) => puedeCambiar(act, n) && fetch(`/api/matriculas/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estado: n }) }).then(load);
   const eliminar = (id) => fetch(`/api/matriculas/${id}`, { method: 'DELETE' }).then(load);
 
@@ -29,6 +32,7 @@ export default function MatriculasCRUD() {
             <tr key={m.id}>
               <td>{m.estudiante}</td><td>{m.curso}</td><td><b>{m.estado}</b></td>
               <td>
+                {/* Renderiza solo los botones de las transiciones permitidas por el State */}
                 {Estados[m.estado]?.map(e => <button key={e} onClick={() => cambiar(m.id, m.estado, e)} style={{ marginRight: 4 }}>→ {e}</button>)}
                 <button onClick={() => eliminar(m.id)}>Eliminar</button>
               </td>
