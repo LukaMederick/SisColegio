@@ -1,0 +1,7 @@
+# Dependencias y builds del frontend
+frontend/node_modules/
+frontend/dist/
+
+# Base de datos local
+backend/*.db-shm
+backend/*.db-wal
