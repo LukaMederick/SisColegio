@@ -1,32 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 
-// El historial guarda mementos inmutables del valor anterior a cada edición.
-export default function useMemento(initialValue) {
-  const [value, setValue] = useState(initialValue);
+// Patrón Memento: permite guardar instantáneas y deshacer
+export default function useMemento(initial = []) {
+  const [data, setData] = useState(initial);
   const [history, setHistory] = useState([]);
 
-  useEffect(() => {
-    setValue(initialValue);
-    setHistory([]);
-  }, [initialValue]);
+  const setSnapshot = (val) => {
+    setHistory((h) => [...h, data]);
+    setData(val);
+  };
 
-  const update = useCallback((nextValue) => {
-    setHistory((previous) => [...previous, value]);
-    setValue(nextValue);
-  }, [value]);
+  const undo = () => {
+    if (!history.length) return;
+    setData(history[history.length - 1]);
+    setHistory((h) => h.slice(0, -1));
+  };
 
-  const undo = useCallback(() => {
-    if (history.length === 0) return value;
-    const previousValue = history[history.length - 1];
-    setHistory((previous) => previous.slice(0, -1));
-    setValue(previousValue);
-    return previousValue;
-  }, [history, value]);
-
-  const commit = useCallback((savedValue) => {
-    setValue(savedValue);
-    setHistory([]);
-  }, []);
-
-  return { value, update, undo, commit, canUndo: history.length > 0 };
+  return { data, setData: setSnapshot, undo, canUndo: history.length > 0 };
 }

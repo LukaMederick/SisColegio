@@ -1,52 +1,29 @@
 import { useState } from 'react';
-import MatriculasCRUD from './components/MatriculasCRUD.jsx';
-import NotasCRUD from './components/NotasCRUD.jsx';
-import CatalogosCRUD from './components/CatalogosCRUD.jsx';
-
-const modulos = [
-  { id: 'docentes', label: '1. Docentes' },
-  { id: 'clases', label: '2. Clases' },
-  { id: 'matriculas', label: '3. Matrículas' },
-  { id: 'asistencias', label: '4. Asistencias' },
-  { id: 'notas', label: '5. Notas' },
-];
+import MatriculasCRUD from './components/MatriculasCRUD';
+import NotasCRUD from './components/NotasCRUD';
 
 export default function App() {
-  const [modulo, setModulo] = useState('docentes');
-
-  function contenido() {
-    if (modulo === 'matriculas') return <MatriculasCRUD />;
-    if (modulo === 'notas') return <NotasCRUD />;
-    return <CatalogosCRUD key={modulo} tipo={modulo} />;
-  }
+  const [tab, setTab] = useState('matriculas');
 
   return (
-    <div className="app-shell">
-      <header className="page-header">
-        <div className="brand-mark" aria-hidden="true">GE</div>
-        <div>
-          <p className="eyebrow">PANEL ACADÉMICO</p>
-          <h1>Gestión educativa</h1>
-          <p className="page-description">Matrículas, notas, asistencias, clases y docentes en un solo lugar.</p>
-        </div>
-      </header>
-      <nav className="section-nav" aria-label="Secciones de gestión">
-        {modulos.map((item) => (
-          <button
-            key={item.id}
-            className={modulo === item.id ? 'nav-button active' : 'nav-button'}
-            type="button"
-            aria-current={modulo === item.id ? 'page' : undefined}
-            onClick={() => setModulo(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
-      <main className="content-grid">
-        {contenido()}
-      </main>
-      <footer className="page-footer">Sistema de gestión educativa</footer>
+    <div style={{ maxWidth: 850, margin: '20px auto', padding: '0 16px' }}>
+      <h1>Sistema Académico</h1>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+        <button
+          onClick={() => setTab('matriculas')}
+          style={{ fontWeight: tab === 'matriculas' ? 'bold' : 'normal', background: tab === 'matriculas' ? '#4263eb' : '', color: tab === 'matriculas' ? '#fff' : '' }}
+        >
+          1. Matrículas (State)
+        </button>
+        <button
+          onClick={() => setTab('notas')}
+          style={{ fontWeight: tab === 'notas' ? 'bold' : 'normal', background: tab === 'notas' ? '#4263eb' : '', color: tab === 'notas' ? '#fff' : '' }}
+        >
+          2. Notas (Memento)
+        </button>
+      </div>
+
+      {tab === 'matriculas' ? <MatriculasCRUD /> : <NotasCRUD />}
     </div>
   );
 }

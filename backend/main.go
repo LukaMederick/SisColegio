@@ -2,167 +2,173 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
-	"os"
+	"strconv"
+	"strings"
 
 	_ "modernc.org/sqlite"
-
-	"proyecto-grupo4/backend/handlers"
-	"proyecto-grupo4/backend/models"
-	"proyecto-grupo4/backend/repository"
 )
 
+type Matricula struct {
+	ID         int64  `json:"id"`
+	Estudiante string `json:"estudiante"`
+	Curso      string `json:"curso"`
+	Estado     string `json:"estado"`
+}
+
+var db *sql.DB
+
 func main() {
-	dbPath := os.Getenv("DATABASE_PATH")
-	if dbPath == "" {
-		dbPath = "educacion.db"
-	}
-	db, err := sql.Open("sqlite", dbPath)
+	var err error
+	db, err = sql.Open("sqlite", "educacion.db")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
-	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
-		log.Fatal(err)
-	}
-	if err := initializeDB(db); err != nil {
-		log.Fatal(err)
-	}
+
+	db.Exec(`
+		CREATE TABLE IF NOT EXISTS matriculas (id INTEGER PRIMARY KEY AUTOINCREMENT, estudiante TEXT, curso TEXT, estado TEXT);
+		CREATE TABLE IF NOT EXISTS notas (id INTEGER PRIMARY KEY AUTOINCREMENT, estudiante TEXT, curso TEXT, calificacion REAL);
+		CREATE TABLE IF NOT EXISTS mementos (id INTEGER PRIMARY KEY AUTOINCREMENT, nota_id INTEGER, calificacion REAL);
+	`)
 
 	mux := http.NewServeMux()
-	matriculas := handlers.MatriculasHandler{Store: repository.MatriculaRepository{DB: db}}
-	notaRepo := repository.NotaRepository{DB: db}
-	caretaker := models.NuevoNotaCaretaker(notaRepo)
-	notas := handlers.NotasHandler{
-		Store:         notaRepo,
-		Caretaker:     caretaker,
-		MatriculaStore: repository.MatriculaRepository{DB: db},
-	}
-	docentes := handlers.DocentesHandler{Store: repository.DocenteRepository{DB: db}}
-	clases := handlers.ClasesHandler{Store: repository.ClaseRepository{DB: db}}
-	asistencias := handlers.AsistenciasHandler{Store: repository.AsistenciaRepository{DB: db}}
-	mux.Handle("/api/matriculas", matriculas)
-	mux.Handle("/api/matriculas/", matriculas)
-	mux.Handle("/api/notas", notas)
-	mux.Handle("/api/notas/", notas)
-	mux.Handle("/api/docentes", docentes)
-	mux.Handle("/api/docentes/", docentes)
-	mux.Handle("/api/clases", clases)
-	mux.Handle("/api/clases/", clases)
-	mux.Handle("/api/asistencias", asistencias)
-	mux.Handle("/api/asistencias/", asistencias)
+	mux.HandleFunc("/api/matriculas", handleMatriculas)
+	mux.HandleFunc("/api/matriculas/", handleMatriculaID)
+	mux.HandleFunc("/api/notas", handleNotas)
+	mux.HandleFunc("/api/notas/", handleNotaID)
 
-	addr := os.Getenv("API_ADDR")
-	if addr == "" {
-		addr = ":8080"
-	}
-	log.Printf("API escuchando en http://localhost%s", addr)
-	log.Fatal(http.ListenAndServe(addr, cors(mux)))
-}
-
-func initializeDB(db *sql.DB) error {
-	const schema = `
-	CREATE TABLE IF NOT EXISTS matriculas (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		estudiante TEXT NOT NULL,
-		apellido TEXT NOT NULL DEFAULT '',
-		grado_curso TEXT NOT NULL DEFAULT '',
-		seccion TEXT NOT NULL DEFAULT '',
-		fecha_inscripcion TEXT NOT NULL DEFAULT '',
-		tutor_responsable TEXT NOT NULL DEFAULT '',
-		estado TEXT NOT NULL CHECK (estado IN ('Pendiente', 'Activa', 'Anulada', 'Finalizada'))
-	);
-	CREATE TABLE IF NOT EXISTS notas (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		estudiante TEXT NOT NULL,
-		curso TEXT NOT NULL,
-		calificacion REAL NOT NULL CHECK (calificacion >= 0 AND calificacion <= 20)
-	);
-	CREATE TABLE IF NOT EXISTS docentes (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		nombre TEXT NOT NULL,
-		especialidad TEXT NOT NULL,
-		correo TEXT NOT NULL
-	);
-	CREATE TABLE IF NOT EXISTS clases (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		nombre TEXT NOT NULL,
-		horario TEXT NOT NULL,
-		docente_id INTEGER NOT NULL REFERENCES docentes(id) ON DELETE RESTRICT
-	);
-	CREATE TABLE IF NOT EXISTS asistencias (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		matricula_id INTEGER NOT NULL REFERENCES matriculas(id) ON DELETE RESTRICT,
-		clase_id INTEGER NOT NULL REFERENCES clases(id) ON DELETE RESTRICT,
-		fecha TEXT NOT NULL,
-		estado TEXT NOT NULL CHECK (estado IN ('Presente', 'Tardanza', 'Ausente')),
-		UNIQUE (matricula_id, clase_id, fecha)
-	);
-	CREATE TABLE IF NOT EXISTS nota_versiones (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		nota_id INTEGER NOT NULL REFERENCES notas(id) ON DELETE CASCADE,
-		estudiante TEXT NOT NULL,
-		curso TEXT NOT NULL,
-		calificacion REAL NOT NULL,
-		fecha_modificacion TEXT NOT NULL
-	);`
-	_, err := db.Exec(schema)
-	if err != nil {
-		return err
-	}
-
-	columns, err := db.Query(`PRAGMA table_info(matriculas)`) 
-	if err != nil {
-		return err
-	}
-	defer columns.Close()
-
-	present := map[string]bool{}
-	for columns.Next() {
-		var cid int
-		var name, colType string
-		var notNull, pk int
-		var dfltValue sql.NullString
-		if err := columns.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
-			return err
-		}
-		present[name] = true
-	}
-	if err := columns.Err(); err != nil {
-		return err
-	}
-
-	for _, columnName := range []string{"apellido", "grado_curso", "seccion", "fecha_inscripcion", "tutor_responsable"} {
-		if !present[columnName] {
-			if _, err := db.Exec("ALTER TABLE matriculas ADD COLUMN " + columnName + " TEXT NOT NULL DEFAULT ''"); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
+	log.Println("API corriendo en http://localhost:8080")
+	log.Fatal(http.ListenAndServe(":8080", cors(mux)))
 }
 
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin == "http://localhost:5173" || origin == "http://127.0.0.1:5173" || origin == "" {
-			if origin != "" {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-			} else {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
-			}
-		} else {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-		}
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
+		if r.Method == "OPTIONS" {
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func handleMatriculas(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "GET" {
+		rows, _ := db.Query("SELECT id, estudiante, curso, estado FROM matriculas")
+		defer rows.Close()
+		res := []Matricula{}
+		for rows.Next() {
+			var m Matricula
+			rows.Scan(&m.ID, &m.Estudiante, &m.Curso, &m.Estado)
+			res = append(res, m)
+		}
+		json.NewEncoder(w).Encode(res)
+		return
+	}
+	if r.Method == "POST" {
+		var m Matricula
+		json.NewDecoder(r.Body).Decode(&m)
+		if m.Estado == "" {
+			m.Estado = "Pendiente"
+		}
+		res, _ := db.Exec("INSERT INTO matriculas (estudiante, curso, estado) VALUES (?, ?, ?)", m.Estudiante, m.Curso, m.Estado)
+		m.ID, _ = res.LastInsertId()
+		json.NewEncoder(w).Encode(m)
+	}
+}
+
+func handleMatriculaID(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/matriculas/"), 10, 64)
+	if r.Method == "DELETE" {
+		db.Exec("DELETE FROM matriculas WHERE id = ?", id)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method == "PUT" {
+		var body struct {
+			Estado string `json:"estado"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		var actual string
+		db.QueryRow("SELECT estado FROM matriculas WHERE id = ?", id).Scan(&actual)
+
+		// Patrón STATE: delegar validación al objeto de Estado
+		if !ObtenerEstado(actual).PuedePasar(body.Estado) {
+			http.Error(w, fmt.Sprintf("Transición inválida de %s a %s", actual, body.Estado), http.StatusBadRequest)
+			return
+		}
+		db.Exec("UPDATE matriculas SET estado = ? WHERE id = ?", body.Estado, id)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func handleNotas(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == "GET" {
+		rows, _ := db.Query("SELECT id, estudiante, curso, calificacion FROM notas")
+		defer rows.Close()
+		res := []Nota{}
+		for rows.Next() {
+			var n Nota
+			rows.Scan(&n.ID, &n.Estudiante, &n.Curso, &n.Calificacion)
+			res = append(res, n)
+		}
+		json.NewEncoder(w).Encode(res)
+		return
+	}
+	if r.Method == "POST" {
+		var n Nota
+		json.NewDecoder(r.Body).Decode(&n)
+		res, _ := db.Exec("INSERT INTO notas (estudiante, curso, calificacion) VALUES (?, ?, ?)", n.Estudiante, n.Curso, n.Calificacion)
+		n.ID, _ = res.LastInsertId()
+		json.NewEncoder(w).Encode(n)
+	}
+}
+
+func handleNotaID(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/notas/")
+	if strings.HasSuffix(path, "/undo") {
+		id, _ := strconv.ParseInt(strings.TrimSuffix(path, "/undo"), 10, 64)
+		// Patrón MEMENTO: Caretaker recupera el último snapshot
+		var mID int64
+		var memento NotaMemento
+		err := db.QueryRow("SELECT id, calificacion FROM mementos WHERE nota_id = ? ORDER BY id DESC LIMIT 1", id).Scan(&mID, &memento.Calificacion)
+		if err != nil {
+			http.Error(w, "Sin historial para deshacer", http.StatusBadRequest)
+			return
+		}
+		var nota Nota
+		db.QueryRow("SELECT id, estudiante, curso, calificacion FROM notas WHERE id = ?", id).Scan(&nota.ID, &nota.Estudiante, &nota.Curso, &nota.Calificacion)
+		nota.Restaurar(memento)
+		db.Exec("UPDATE notas SET calificacion = ? WHERE id = ?", nota.Calificacion, id)
+		db.Exec("DELETE FROM mementos WHERE id = ?", mID)
+		json.NewEncoder(w).Encode(nota)
+		return
+	}
+
+	id, _ := strconv.ParseInt(path, 10, 64)
+	if r.Method == "DELETE" {
+		db.Exec("DELETE FROM notas WHERE id = ?", id)
+		db.Exec("DELETE FROM mementos WHERE nota_id = ?", id)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method == "PUT" {
+		var n Nota
+		json.NewDecoder(r.Body).Decode(&n)
+		// Patrón MEMENTO: Originator crea memento antes de mutar
+		var actual Nota
+		db.QueryRow("SELECT id, estudiante, curso, calificacion FROM notas WHERE id = ?", id).Scan(&actual.ID, &actual.Estudiante, &actual.Curso, &actual.Calificacion)
+		memento := actual.CrearMemento()
+		db.Exec("INSERT INTO mementos (nota_id, calificacion) VALUES (?, ?)", memento.NotaID, memento.Calificacion)
+
+		db.Exec("UPDATE notas SET estudiante = ?, curso = ?, calificacion = ? WHERE id = ?", n.Estudiante, n.Curso, n.Calificacion, id)
+		w.WriteHeader(http.StatusOK)
+	}
 }

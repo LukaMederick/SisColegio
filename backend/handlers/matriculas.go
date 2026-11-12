@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -10,161 +10,55 @@ import (
 	"proyecto-grupo4/backend/models"
 )
 
-type MatriculaStore interface {
-	List(ctx context.Context) ([]models.Matricula, error)
-	Create(ctx context.Context, item models.Matricula) (models.Matricula, error)
-	Update(ctx context.Context, item models.Matricula) (models.Matricula, error)
-	Delete(ctx context.Context, id int64) error
-	UpdateEstado(ctx context.Context, id int64, estado string) error
-}
-
-type MatriculasHandler struct{ Store MatriculaStore }
+type MatriculasHandler struct{ DB *sql.DB }
 
 func (h MatriculasHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/api/matriculas" {
-		switch r.Method {
-		case http.MethodGet:
-			h.list(w, r)
-		case http.MethodPost:
-			h.create(w, r)
-		default:
-			methodNotAllowed(w)
-		}
-		return
-	}
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) == 3 && parts[0] == "api" && parts[1] == "matriculas" {
-		id, err := strconv.ParseInt(parts[2], 10, 64)
-		if err != nil || id < 1 {
-			writeError(w, http.StatusBadRequest, "id inválido")
+	w.Header().Set("Content-Type", "application/json")
+	path := strings.TrimPrefix(r.URL.Path, "/api/matriculas")
+
+	if path == "" || path == "/" {
+		if r.Method == http.MethodGet {
+			rows, _ := h.DB.Query("SELECT id, estudiante, curso, estado FROM matriculas")
+			defer rows.Close()
+			res := []models.Matricula{}
+			for rows.Next() {
+				var m models.Matricula
+				rows.Scan(&m.ID, &m.Estudiante, &m.Curso, &m.Estado)
+				res = append(res, m)
+			}
+			json.NewEncoder(w).Encode(res)
 			return
 		}
-		switch r.Method {
-		case http.MethodPut:
-			h.update(w, r, id)
-		case http.MethodDelete:
-			h.delete(w, r, id)
-		default:
-			methodNotAllowed(w)
-		}
-		return
-	}
-	if len(parts) != 4 || parts[0] != "api" || parts[1] != "matriculas" || parts[3] != "estado" {
-		http.NotFound(w, r)
-		return
-	}
-	if r.Method != http.MethodPut {
-		methodNotAllowed(w)
-		return
-	}
-	id, err := strconv.ParseInt(parts[2], 10, 64)
-	if err != nil || id < 1 {
-		writeError(w, http.StatusBadRequest, "id inválido")
-		return
-	}
-	var input struct {
-		Estado string `json:"estado"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON inválido")
-		return
-	}
-	items, err := h.Store.List(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "no se pudo validar la matrícula")
-		return
-	}
-	var matriculaEncontrada *models.Matricula
-	for _, item := range items {
-		if item.ID == id {
-			matriculaEncontrada = &item
-			break
+		if r.Method == http.MethodPost {
+			var m models.Matricula
+			json.NewDecoder(r.Body).Decode(&m)
+			if m.Estado == "" { m.Estado = "Pendiente" }
+			res, _ := h.DB.Exec("INSERT INTO matriculas (estudiante, curso, estado) VALUES (?, ?, ?)", m.Estudiante, m.Curso, m.Estado)
+			m.ID, _ = res.LastInsertId()
+			json.NewEncoder(w).Encode(m)
+			return
 		}
 	}
-	if matriculaEncontrada == nil {
-		writeError(w, http.StatusNotFound, "matrícula no encontrada")
-		return
-	}
-	if err := matriculaEncontrada.CambiarEstado(input.Estado); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
-		return
-	}
-	if err := h.Store.UpdateEstado(r.Context(), id, matriculaEncontrada.Estado); err != nil {
-		writeError(w, http.StatusInternalServerError, "no se pudo actualizar la matrícula")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"mensaje": "estado actualizado", "estado": matriculaEncontrada.Estado})
-}
 
-func (h MatriculasHandler) update(w http.ResponseWriter, r *http.Request, id int64) {
-	var item models.Matricula
-	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON inválido")
+	id, _ := strconv.ParseInt(strings.TrimPrefix(path, "/"), 10, 64)
+	if r.Method == http.MethodDelete {
+		h.DB.Exec("DELETE FROM matriculas WHERE id = ?", id)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	item.ID = id
-	item.Estudiante = strings.TrimSpace(item.Estudiante)
-	item.Apellido = strings.TrimSpace(item.Apellido)
-	item.GradoCurso = strings.TrimSpace(item.GradoCurso)
-	item.Seccion = strings.TrimSpace(item.Seccion)
-	item.FechaInscripcion = strings.TrimSpace(item.FechaInscripcion)
-	item.TutorResponsable = strings.TrimSpace(item.TutorResponsable)
-	if item.Estudiante == "" || item.Apellido == "" || item.GradoCurso == "" || item.Seccion == "" || item.FechaInscripcion == "" || item.TutorResponsable == "" {
-		writeError(w, http.StatusBadRequest, "nombre, apellido, grado/curso, sección, fecha de inscripción y tutor son obligatorios")
-		return
-	}
-	updated, err := h.Store.Update(r.Context(), item)
-	if err != nil {
-		writeCatalogError(w, err, "matrícula no encontrada")
-		return
-	}
-	writeJSON(w, http.StatusOK, updated)
-}
+	if r.Method == http.MethodPut {
+		var body struct{ Estado string `json:"estado"` }
+		json.NewDecoder(r.Body).Decode(&body)
 
-func (h MatriculasHandler) delete(w http.ResponseWriter, r *http.Request, id int64) {
-	if err := h.Store.Delete(r.Context(), id); err != nil {
-		writeCatalogError(w, err, "matrícula no encontrada")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
+		var m models.Matricula
+		h.DB.QueryRow("SELECT id, estudiante, curso, estado FROM matriculas WHERE id = ?", id).Scan(&m.ID, &m.Estudiante, &m.Curso, &m.Estado)
 
-func (h MatriculasHandler) list(w http.ResponseWriter, r *http.Request) {
-	items, err := h.Store.List(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "no se pudieron listar las matrículas")
-		return
+		// Aplicación del Patrón STATE
+		if err := m.CambiarEstado(body.Estado); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		h.DB.Exec("UPDATE matriculas SET estado = ? WHERE id = ?", m.Estado, id)
+		w.WriteHeader(http.StatusOK)
 	}
-	writeJSON(w, http.StatusOK, items)
-}
-
-func (h MatriculasHandler) create(w http.ResponseWriter, r *http.Request) {
-	var input models.Matricula
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON inválido")
-		return
-	}
-	input.Estudiante = strings.TrimSpace(input.Estudiante)
-	input.Apellido = strings.TrimSpace(input.Apellido)
-	input.GradoCurso = strings.TrimSpace(input.GradoCurso)
-	input.Seccion = strings.TrimSpace(input.Seccion)
-	input.FechaInscripcion = strings.TrimSpace(input.FechaInscripcion)
-	input.TutorResponsable = strings.TrimSpace(input.TutorResponsable)
-	if input.Estudiante == "" || input.Apellido == "" || input.GradoCurso == "" || input.Seccion == "" || input.FechaInscripcion == "" || input.TutorResponsable == "" {
-		writeError(w, http.StatusBadRequest, "nombre, apellido, grado/curso, sección, fecha de inscripción y tutor son obligatorios")
-		return
-	}
-	if input.Estado == "" {
-		input.Estado = "Activa"
-	}
-	if !models.EstadosMatricula[input.Estado] {
-		writeError(w, http.StatusBadRequest, "estado inválido")
-		return
-	}
-	created, err := h.Store.Create(r.Context(), input)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "no se pudo crear la matrícula")
-		return
-	}
-	writeJSON(w, http.StatusCreated, created)
 }
